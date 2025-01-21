@@ -1,7 +1,8 @@
+
+// UploadDocument.js
 import React, { useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import axios from 'axios';
-import { MESSAGE } from '../../config';
+import { uploadToIPFS, encryptCID, sendToBackend, hashFile } from './utilities/Upload';
 
 const UploadDocument = () => {
   const [file, setFile] = useState(null);
@@ -17,107 +18,13 @@ const UploadDocument = () => {
     setFileType(selectedFile.type);
   };
 
-  const handleCustomFileNameChange = (e) => {
-    setCustomFileName(e.target.value);
-  };
+  const handleCustomFileNameChange = (e) => setCustomFileName(e.target.value);
 
-  const handleFileTypeChange = (e) => {
-    setFileType(e.target.value);  // User selects file type from dropdown
-  };
-
-  const hashFile = async (file) => {
-    const fileBuffer = await file.arrayBuffer();
-    const hashBuffer = await crypto.subtle.digest('SHA-256', fileBuffer);
-    const hashArray = new Uint8Array(hashBuffer);
-    return hashArray;
-  };
-
-  const deriveAESKeyFromSignature = async (signature) => {
-    const hashBuffer = await crypto.subtle.digest("SHA-256", signature);
-    return await crypto.subtle.importKey(
-      "raw",
-      hashBuffer,
-      { name: "AES-GCM" },
-      false,
-      ["encrypt", "decrypt"]
-    );
-  };
-
-  const encryptCID = async (cid) => {
-    try {
-      if (!signMessage) {
-        throw new Error('signMessage function is not available.');
-      }
-      
-      const predefinedMessage = new TextEncoder().encode(MESSAGE);
-      const signature = await signMessage(predefinedMessage);
-      const aesKey = await deriveAESKeyFromSignature(signature);
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const encryptedCID = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv: iv },
-        aesKey,
-        new TextEncoder().encode(cid)
-      );
-
-      const encryptedCIDBase64 = btoa(String.fromCharCode(...new Uint8Array(encryptedCID)));
-      const ivBase64 = btoa(String.fromCharCode(...iv));
-      return { encryptedCID: encryptedCIDBase64, iv: ivBase64 };
-    } catch (error) {
-      setError('Error encrypting CID.');
-      console.error("Error encrypting CID:", error);
-    }
-  };
-
-  const uploadToIPFS = async (file) => {
-    try {
-      setLoading(true);
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await axios.post('http://127.0.0.1:5001/api/v0/add', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      if (response.data?.Hash) {
-        return response.data.Hash;
-      } else {
-        throw new Error('Failed to upload file to IPFS');
-      }
-    } catch (err) {
-      setError('Error uploading file to IPFS.');
-      setLoading(false);
-      console.error(err);
-    }
-  };
-
-  const sendToBackend = async ({ encryptedCID, iv }, fileHash) => {
-    try {
-      const token = localStorage.getItem('jwt');
-      if (!token) {
-        throw new Error('JWT token not found');
-      }
-      const response = await axios.post('http://localhost:3000/upload-doc', {
-        encryptedCID,
-        iv,
-        fileHash: Array.from(fileHash),
-        fileType,
-        customFileName,
-      }, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        }
-      });
-
-      console.log('Backend response:', response.data);
-    } catch (err) {
-      setError('Error sending data to backend.');
-      console.error('Error sending data to backend:', err);
-    }
-  };
+  const handleFileTypeChange = (e) => setFileType(e.target.value);
 
   const handleUpload = async () => {
+    setError('');
+
     if (!file) {
       setError('Please select a file to upload.');
       return;
@@ -130,18 +37,16 @@ const UploadDocument = () => {
 
     try {
       const fileHash = await hashFile(file);
-      const ipfsCID = await uploadToIPFS(file);
+      const ipfsCID = await uploadToIPFS(file, setLoading, setError);
       if (!ipfsCID) return;
 
-      const encryptedCID = await encryptCID(ipfsCID);
-      await sendToBackend(encryptedCID, fileHash);
+      const encryptedCID = await encryptCID(ipfsCID, signMessage);
+      await sendToBackend(encryptedCID, fileHash, fileType, customFileName, setError);
 
-      setLoading(false);
       alert('File uploaded and data sent successfully.');
     } catch (err) {
-      setLoading(false);
+      console.error('Upload process failed:', err);
       setError('Error during the file upload process.');
-      console.error(err);
     }
   };
 

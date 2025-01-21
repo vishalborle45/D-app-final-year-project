@@ -1,23 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import { useWallet } from '@solana/wallet-adapter-react'; // Solana wallet adapter
-import { MESSAGE } from '../../config';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { decryptCID, fetchFileFromIPFS } from './utilities/View';
 
-function ViewAllDocuments() {
+const ViewAllDocuments = () => {
   const [documents, setDocuments] = useState([]);
   const [error, setError] = useState('');
-  const { publicKey, signMessage } = useWallet();
+  const { signMessage } = useWallet();
 
   useEffect(() => {
     const fetchDocuments = async () => {
       try {
-        const token = localStorage.getItem('jwt'); // Retrieve the JWT token from localStorage
+        const token = localStorage.getItem('jwt');
         if (!token) {
           throw new Error('JWT token not found');
         }
         const response = await axios.get('http://localhost:3000/api/documents', {
           headers: {
-            Authorization: `Bearer ${token}`, // Include the token in the Authorization header
+            Authorization: `Bearer ${token}`,
           },
         });
         setDocuments(response.data.documents);
@@ -30,69 +30,31 @@ function ViewAllDocuments() {
     fetchDocuments();
   }, []);
 
-  const decryptCID = async (encryptedCID, iv) => {
+  const viewFile = async (encryptedCID, iv) => {
     try {
-      if (!signMessage) {
-        throw new Error('signMessage function is not available.');
-      }
-
-      const message = MESSAGE;
-      const encodedMessage = new TextEncoder().encode(message);
-      const signature = await signMessage(encodedMessage);
-
-      const aesKey = await deriveAESKeyFromSignature(signature);
-      const ivBuffer = Uint8Array.from(atob(iv), c => c.charCodeAt(0)); 
-      const encryptedBuffer = Uint8Array.from(atob(encryptedCID), c => c.charCodeAt(0));
-
-      const decryptedCID = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: ivBuffer },
-        aesKey,
-        encryptedBuffer
-      );
-
-      return new TextDecoder().decode(decryptedCID); 
-    } catch (error) {
-      console.error('Error decrypting CID:', error);
-      alert('Failed to decrypt CID.');
-      return null;
-    }
-  };
-
-  const fetchFileFromIPFS = async (cid) => {
-    try {
-      const response = await fetch(`http://127.0.0.1:8080/ipfs/${cid}`);
-      if (response.ok) {
-        return await response.blob();
-      } else {
-        throw new Error('Error fetching file from IPFS');
+      const decryptedCID = await decryptCID(encryptedCID, iv, signMessage);
+      const fileBlob = await fetchFileFromIPFS(decryptedCID);
+      if (fileBlob) {
+        const fileURL = URL.createObjectURL(fileBlob);
+        window.open(fileURL);
       }
     } catch (error) {
-      console.error('Error fetching file from IPFS:', error);
-      alert('Error fetching file from IPFS');
+      alert(error.message);
     }
   };
 
   const downloadFile = async (encryptedCID, iv, fileType) => {
-    const decryptedCID = await decryptCID(encryptedCID, iv);
-    if (decryptedCID) {
+    try {
+      const decryptedCID = await decryptCID(encryptedCID, iv, signMessage);
       const fileBlob = await fetchFileFromIPFS(decryptedCID);
       if (fileBlob) {
         const link = document.createElement('a');
         link.href = URL.createObjectURL(fileBlob);
-        link.download = `download.${fileType}`; 
+        link.download = `download.${fileType}`;
         link.click();
       }
-    }
-  };
-
-  const viewFile = async (encryptedCID, iv) => {
-    const decryptedCID = await decryptCID(encryptedCID, iv);
-    if (decryptedCID) {
-      const fileBlob = await fetchFileFromIPFS(decryptedCID);
-      if (fileBlob) {
-        const fileURL = URL.createObjectURL(fileBlob);
-        window.open(fileURL); 
-      }
+    } catch (error) {
+      alert(error.message);
     }
   };
 
@@ -130,17 +92,6 @@ function ViewAllDocuments() {
       )}
     </div>
   );
-}
-
-async function deriveAESKeyFromSignature(signature) {
-  const hashBuffer = await crypto.subtle.digest('SHA-256', signature);
-  return await crypto.subtle.importKey(
-    'raw',
-    hashBuffer,
-    { name: 'AES-GCM' },
-    false,
-    ['encrypt', 'decrypt']
-  );
-}
+};
 
 export default ViewAllDocuments;

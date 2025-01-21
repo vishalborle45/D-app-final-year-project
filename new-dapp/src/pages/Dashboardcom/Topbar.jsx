@@ -1,28 +1,29 @@
 import React, { useEffect, useState } from "react";
-import { PublicKey, Connection } from "@solana/web3.js";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { PublicKey, Connection, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useNavigate } from "react-router-dom";
 import { ALCHEMY_URL } from "../../config";
 
 const TopBar = () => {
   const { publicKey, disconnect } = useWallet();
+  const { connection } = useConnection();
   const [balance, setBalance] = useState(0);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [loading, setLoading] = useState(false); // Track the loading state
   const navigate = useNavigate();
 
+  const fetchBalance = async () => {
+    if (!publicKey) return;
+
+    try {
+      const walletBalance = await connection.getBalance(publicKey);
+      setBalance(walletBalance / LAMPORTS_PER_SOL); // Convert lamports to SOL
+    } catch (error) {
+      console.error("Failed to fetch balance:", error.message);
+    }
+  };
+
   useEffect(() => {
-    const fetchBalance = async () => {
-      if (!publicKey) return;
-
-      try {
-        const connection = new Connection(ALCHEMY_URL, "confirmed");
-        const walletBalance = await connection.getBalance(publicKey);
-        setBalance(walletBalance / 1e9); // Convert lamports to SOL
-      } catch (error) {
-        console.error("Failed to fetch balance:", error.message);
-      }
-    };
-
     fetchBalance();
   }, [publicKey]);
 
@@ -36,6 +37,27 @@ const TopBar = () => {
     setShowProfileDropdown((prev) => !prev);
   };
 
+  const requestAirdrop = async () => {
+    if (!publicKey || loading) return; // Don't request if already in progress
+
+    try {
+      setLoading(true); // Set loading to true while processing the request
+
+      const conne = new Connection("https://api.devnet.solana.com");
+      const airdropSignature = await conne.requestAirdrop(publicKey, 1 * LAMPORTS_PER_SOL); // Request 1 SOL
+      await connection.confirmTransaction(airdropSignature); // Confirm the transaction
+      console.log("Airdrop successful!");
+
+      // Refetch the balance after the airdrop
+      fetchBalance();
+
+    } catch (error) {
+      console.error("Airdrop failed:", error.message);
+    } finally {
+      setLoading(false); // Reset loading state after completion (either success or failure)
+    }
+  };
+
   return (
     <header className="flex items-center justify-between bg-blue-600 text-white py-2 px-6 shadow-md">
       <h1 className="text-lg font-bold">My Solana App</h1>
@@ -46,6 +68,15 @@ const TopBar = () => {
             <div className="text-sm">
               Balance: <span className="font-medium">{balance.toFixed(2)} SOL</span>
             </div>
+
+            {/* Airdrop Button */}
+            <button
+              onClick={requestAirdrop}
+              disabled={loading} // Disable the button if request is in progress
+              className="bg-green-500 hover:bg-green-600 text-white text-sm py-2 px-4 rounded"
+            >
+              {loading ? "Requesting Airdrop..." : "Request Airdrop"}
+            </button>
 
             {/* Profile Icon and Dropdown */}
             <div className="relative">
